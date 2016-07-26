@@ -1,0 +1,108 @@
+#-*- coding:utf-8 -*-
+__author__ = 'gao'
+import sys
+from lxml import etree
+import requests
+import dic_formate
+import wri_mongo
+
+
+TABLE_XPATH = "//table"
+TR_XPATH = "tr"
+TD_XPATH = "td"
+
+
+def get_tables(url):
+    tables = []
+    try:
+        session = requests.session()
+        session.proxies = {"http": "http://10.16.13.18:8080", "https": "http://10.16.13.18:8080"}
+        respone = session.get(url, timeout=10)
+        status_code = respone.status_code
+        if 200 == status_code:
+            dom_tree = etree.HTML(respone.content.replace("<br", ""))
+            tables = dom_tree.xpath(TABLE_XPATH)
+        else:
+            print("response status_code is not 200: status_code: {0}".format(status_code))
+    except Exception as e:
+        print("Exception: {0}".format(e))
+
+
+    return tables
+
+
+def get_data(tables, lan, DATE):
+    for index, table in enumerate(tables):
+        if index != 0:
+            for index_2, tr in enumerate(table.xpath(TR_XPATH)):
+
+                if index_2 != 0:
+                    lst = []
+
+                    for index_1, td in enumerate(tr.xpath(TD_XPATH)):
+                        if index_1 != 1:
+                            if None != td.text:
+                                lst.append(td.text.replace("/>\n", " "))
+                            for a in td.xpath("a"):
+                                lst.append(a.text)
+
+                    dic = dic_formate.get_formate()
+                    if lan == '':
+                          get_str = u'All Nexus'   #.decode('gbk').encode('utf8')
+
+                    elif lan == '/intl/zh-CN_ALL':
+                           get_str = u'所有 Nexus 设备'   #.decode('gbk').encode('utf8')
+                    if len(lst) == 5 and lst[2] == get_str:  #or u'所有 Nexus 设备'   'All Nexus'
+                        date_1 = DATE.split('-')
+                        dic['id'] = lst[0]
+                        dic['severity'] = lst[1]
+                        dic['affected_version'] = lst[3].split(',')
+                        dic['date']['year'] = date_1[0]
+                        dic['date']['month'] = date_1[1]
+                        dic['date']['day'] = date_1[2]
+
+
+                        for index_tr, tr_pri in enumerate(tables[0].xpath(TR_XPATH)):
+                             if index_tr != 0:
+                                lst2 = []
+                                for index_td, td_pri in enumerate(tr_pri.xpath(TD_XPATH)):
+                                    if None != td_pri.text:
+                                       # print td_pri.text
+                                       if lan == '':
+                                           lst2.append(td_pri.text.replace("/>\n", " "))
+                                       elif lan == '/intl/zh-CN_ALL':
+                                             lst2.append(td_pri.text.replace(">", " "))
+
+
+                                lst3 = lst2[1].split(" ")
+
+                                for item in lst3:
+                                    if item == lst[0]:
+                                        dic['summary'] = lst2[0]
+
+                                        wri_mongo.insert_white_apk(dic)
+
+def main(argv):
+    DATE = argv[1]
+    if argv[2] == 'en':
+        LANGUAGE = ""
+    elif argv[2] == 'ch':
+        LANGUAGE = "/intl/zh-CN_ALL"
+    elif argv[2] == 'ja':
+        LANGUAGE = "/intl/ja_ALL"
+    elif argv[2] == 'ko':
+        LANGUAGE = "/intl/ko_ALL"
+    elif argv[2] == 'ru':
+        LANGUAGE = "/intl/ru_ALL"
+    elif argv[2] == 'tw':
+        LANGUAGE = "/intl/zh-TW_ALL"
+
+    URL = "https://source.android.com%s/security/bulletin/%s.html" % (LANGUAGE, DATE)
+
+    tables = get_tables(URL)
+    wri_mongo.connect()
+    get_data(tables, LANGUAGE, DATE)
+
+
+if __name__ == "__main__":
+    main(sys.argv)
